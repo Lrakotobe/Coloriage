@@ -1,48 +1,65 @@
+import org.apache.spark.sql.SparkSession;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.spark.sql.SparkSession;
-import scala.collection.JavaConversions;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
-public class RenameS3ObjectWithSpark {
+public class FindFileSparkMinIO {
+    public static List<String> find(SparkSession spark, String minioUrl, String accessKey, String secretKey, String bucket, String extension) throws IOException {
+        List<String> matches = new ArrayList<>();
 
-    public static void main(String[] args) throws IOException {
-        String bucketName = "votre-bucket";
-        String directory = "s3a://" + bucketName + "/chemin/nom/";
-        String newFilePath = "s3a://" + bucketName + "/chemin/nom.csv";
-
-        SparkSession spark = SparkSession.builder()
-                .appName("RenameS3Object")
-                .getOrCreate();
-
-        // Lister les fichiers dans le répertoire S3
-        List<String> fileList = JavaConversions.seqAsJavaList(
-                spark.read().format("csv").load(directory).inputFiles()
-        );
-
+        // Configuration de la session Spark pour MinIO
         Configuration hadoopConf = spark.sparkContext().hadoopConfiguration();
+        hadoopConf.set("fs.s3a.endpoint", minioUrl);
+        hadoopConf.set("fs.s3a.access.key", accessKey);
+        hadoopConf.set("fs.s3a.secret.key", secretKey);
+        hadoopConf.set("fs.s3a.path.style.access", "true");
+        hadoopConf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+
+        // Créer un FileSystem pour interagir avec MinIO
         FileSystem fs = FileSystem.get(hadoopConf);
+        Path path = new Path("s3a://" + bucket);
 
-        for (String filePath : fileList) {
-            if (filePath.endsWith(".csv")) {
-                Path oldPath = new Path(filePath);
-                Path newPath = new Path(newFilePath);
+        // Utiliser RemoteIterator pour parcourir les fichiers
+        RemoteIterator<LocatedFileStatus> fileStatusListIterator = fs.listFiles(path, true);
 
-                // Copier l'objet vers le nouveau nom
-                if (fs.rename(oldPath, newPath)) {
-                    System.out.println("Renommage réussi: " + oldPath + " vers " + newPath);
-                } else {
-                    System.err.println("Échec du renommage de: " + oldPath);
-                }
-
-                // Si un seul fichier doit être renommé, on peut sortir de la boucle après le renommage
-                break;
+        while (fileStatusListIterator.hasNext()) {
+            LocatedFileStatus fileStatus = fileStatusListIterator.next();
+            if (fileStatus.getPath().getName().endsWith(extension)) {
+                matches.add(fileStatus.getPath().toString());
             }
         }
 
+        return matches;
+    }
+
+    public static void main(String[] args) throws IOException {
+        // Initialisation de la session Spark
+        SparkSession spark = SparkSession.builder()
+                .appName("FindFileSparkMinIO")
+                .master("local[*]")
+                .getOrCreate();
+
+        // Remplacer par vos paramètres MinIO et l'extension de fichier recherchée
+        String minioUrl = "http://localhost:9000";
+        String accessKey = "your-access-key";
+        String secretKey = "your-secret-key";
+        String bucket = "your-bucket-name";
+        String extension = ".txt";
+
+        List<String> files = find(spark, minioUrl, accessKey, secretKey, bucket, extension);
+
+        // Affichage des fichiers trouvés
+        for (String file : files) {
+            System.out.println(file);
+        }
+
+        // Fermeture de la session Spark
         spark.stop();
     }
 }
