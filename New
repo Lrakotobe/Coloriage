@@ -1,47 +1,48 @@
-import com.amazonaws.auth.profile.ProfileCredentialsProvider;
-import com.amazonaws.regions.Regions;
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import com.amazonaws.services.s3.model.ListObjectsV2Request;
-import com.amazonaws.services.s3.model.ListObjectsV2Result;
-import com.amazonaws.services.s3.model.S3ObjectSummary;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.spark.sql.SparkSession;
+import scala.collection.JavaConversions;
 
-public class RenameS3Object {
+import java.io.IOException;
+import java.util.List;
 
-    public static void main(String[] args) {
+public class RenameS3ObjectWithSpark {
+
+    public static void main(String[] args) throws IOException {
         String bucketName = "votre-bucket";
-        String directory = "chemin/nom/";
-        String newKey = "chemin/nom.csv";
+        String directory = "s3a://" + bucketName + "/chemin/nom/";
+        String newFilePath = "s3a://" + bucketName + "/chemin/nom.csv";
 
-        // Configurer le client S3
-        AmazonS3 s3Client = AmazonS3ClientBuilder.standard()
-                .withRegion(Regions.US_WEST_2)  // Remplacez par votre région
-                .withCredentials(new ProfileCredentialsProvider())
-                .build();
+        SparkSession spark = SparkSession.builder()
+                .appName("RenameS3Object")
+                .getOrCreate();
 
-        // Lister les objets dans le répertoire
-        ListObjectsV2Request listObjectsRequest = new ListObjectsV2Request()
-                .withBucketName(bucketName)
-                .withPrefix(directory);
-        
-        ListObjectsV2Result result = s3Client.listObjectsV2(listObjectsRequest);
-        
-        for (S3ObjectSummary objectSummary : result.getObjectSummaries()) {
-            String oldKey = objectSummary.getKey();
-            
-            // Vérifiez que l'objet est bien le fichier que vous souhaitez renommer
-            if (oldKey.startsWith(directory) && oldKey.endsWith(".csv")) {
+        // Lister les fichiers dans le répertoire S3
+        List<String> fileList = JavaConversions.seqAsJavaList(
+                spark.read().format("csv").load(directory).inputFiles()
+        );
+
+        Configuration hadoopConf = spark.sparkContext().hadoopConfiguration();
+        FileSystem fs = FileSystem.get(hadoopConf);
+
+        for (String filePath : fileList) {
+            if (filePath.endsWith(".csv")) {
+                Path oldPath = new Path(filePath);
+                Path newPath = new Path(newFilePath);
+
                 // Copier l'objet vers le nouveau nom
-                s3Client.copyObject(bucketName, oldKey, bucketName, newKey);
-                System.out.println("Copie réussie: " + oldKey + " vers " + newKey);
+                if (fs.rename(oldPath, newPath)) {
+                    System.out.println("Renommage réussi: " + oldPath + " vers " + newPath);
+                } else {
+                    System.err.println("Échec du renommage de: " + oldPath);
+                }
 
-                // Supprimer l'ancien objet
-                s3Client.deleteObject(bucketName, oldKey);
-                System.out.println("Suppression réussie: " + oldKey);
-                
                 // Si un seul fichier doit être renommé, on peut sortir de la boucle après le renommage
                 break;
             }
         }
+
+        spark.stop();
     }
 }
