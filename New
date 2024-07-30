@@ -1,65 +1,72 @@
-import org.apache.spark.sql.SparkSession;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.RemoteIterator;
-import org.apache.hadoop.fs.LocatedFileStatus;
-import org.apache.hadoop.conf.Configuration;
+import static org.mockito.Mockito.*;
+import static org.junit.Assert.*;
 
-import java.io.IOException;
-import java.util.ArrayList;
+import org.apache.hadoop.fs.*;
+import org.apache.spark.sql.SparkSession;
+import org.junit.Before;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.*;
+import org.mockito.junit.MockitoJUnitRunner;
+
+import java.net.URI;
+import java.util.Arrays;
 import java.util.List;
 
-public class FindFileSparkMinIO {
-    public static List<String> find(SparkSession spark, String minioUrl, String accessKey, String secretKey, String bucket, String extension) throws IOException {
-        List<String> matches = new ArrayList<>();
+@RunWith(MockitoJUnitRunner.class)
+public class utilsTest {
 
-        // Configuration de la session Spark pour MinIO
-        Configuration hadoopConf = spark.sparkContext().hadoopConfiguration();
-        hadoopConf.set("fs.s3a.endpoint", minioUrl);
-        hadoopConf.set("fs.s3a.access.key", accessKey);
-        hadoopConf.set("fs.s3a.secret.key", secretKey);
-        hadoopConf.set("fs.s3a.path.style.access", "true");
-        hadoopConf.set("fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem");
+    @Mock
+    private SparkSession sparkSession;
 
-        // Créer un FileSystem pour interagir avec MinIO
-        FileSystem fs = FileSystem.get(hadoopConf);
-        Path path = new Path("s3a://" + bucket);
+    @Mock
+    private FileSystem fileSystem;
 
-        // Utiliser RemoteIterator pour parcourir les fichiers
-        RemoteIterator<LocatedFileStatus> fileStatusListIterator = fs.listFiles(path, true);
+    @Mock
+    private RemoteIterator<LocatedFileStatus> fileStatusListIterator;
 
-        while (fileStatusListIterator.hasNext()) {
-            LocatedFileStatus fileStatus = fileStatusListIterator.next();
-            if (fileStatus.getPath().getName().endsWith(extension)) {
-                matches.add(fileStatus.getPath().toString());
-            }
-        }
+    @Mock
+    private LocatedFileStatus fileStatus;
 
-        return matches;
+    @Mock
+    private S3Properties s3config;
+
+    @InjectMocks
+    private Utils utils;
+
+    @Before
+    public void setUp() throws Exception {
+        // Initialize the mocks
+        MockitoAnnotations.openMocks(this);
+
+        // Set up mock behavior
+        when(sparkSession.sparkContext()).thenReturn(null); // Simplified for the example
+        when(s3config.getEnv()).thenReturn("someEnv");
+        when(fileSystem.listFiles(any(Path.class), eq(true))).thenReturn(fileStatusListIterator);
     }
 
-    public static void main(String[] args) throws IOException {
-        // Initialisation de la session Spark
-        SparkSession spark = SparkSession.builder()
-                .appName("FindFileSparkMinIO")
-                .master("local[*]")
-                .getOrCreate();
+    @Test
+    public void testFindAndRenameCsvFiles() throws Exception {
+        // Set up the file status iterator mock behavior
+        when(fileStatusListIterator.hasNext()).thenReturn(true, false);
+        when(fileStatusListIterator.next()).thenReturn(fileStatus);
 
-        // Remplacer par vos paramètres MinIO et l'extension de fichier recherchée
-        String minioUrl = "http://localhost:9000";
-        String accessKey = "your-access-key";
-        String secretKey = "your-secret-key";
-        String bucket = "your-bucket-name";
-        String extension = ".txt";
+        // Mock file status behavior
+        Path oldPath = new Path("s3a://someEnv/oldPath");
+        Path newPath = new Path("s3a://someEnv/newPath");
+        when(fileStatus.getPath()).thenReturn(oldPath);
+        when(fileStatus.getPath().getName()).thenReturn("file.csv");
+        when(fileStatus.getPath().toString()).thenReturn("s3a://someEnv/oldPath/file.csv");
 
-        List<String> files = find(spark, minioUrl, accessKey, secretKey, bucket, extension);
+        // Mock file system behavior
+        when(fileSystem.exists(newPath)).thenReturn(false);
 
-        // Affichage des fichiers trouvés
-        for (String file : files) {
-            System.out.println(file);
-        }
+        // Call the method
+        List<String> result = utils.findAndRenameCsvFiles(sparkSession, ".csv", "s3a://someEnv/oldPath", "s3a://someEnv/newPath", s3config);
 
-        // Fermeture de la session Spark
-        spark.stop();
+        // Verify interactions and assert results
+        verify(fileSystem).rename(oldPath, newPath);
+        verify(fileSystem).delete(oldPath, true);
+        assertEquals(Arrays.asList("s3a://someEnv/oldPath/file.csv"), result);
     }
 }
