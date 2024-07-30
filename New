@@ -1,6 +1,7 @@
 import static org.mockito.Mockito.*;
 import static org.junit.Assert.*;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.*;
 import org.apache.spark.sql.SparkSession;
 import org.junit.Before;
@@ -42,6 +43,15 @@ public class utilsTest {
         // Set up mock behavior
         when(sparkSession.sparkContext()).thenReturn(null); // Simplified for the example
         when(s3config.getEnv()).thenReturn("someEnv");
+
+        Configuration hadoopConf = new Configuration();
+        when(sparkSession.sparkContext().hadoopConfiguration()).thenReturn(hadoopConf);
+
+        // Mock FileSystem initialization
+        URI uri = new URI("s3a://" + s3config.getEnv());
+        when(FileSystem.get(uri, hadoopConf)).thenReturn(fileSystem);
+        
+        // Mock FileSystem listFiles behavior
         when(fileSystem.listFiles(any(Path.class), eq(true))).thenReturn(fileStatusListIterator);
     }
 
@@ -52,8 +62,8 @@ public class utilsTest {
         when(fileStatusListIterator.next()).thenReturn(fileStatus);
 
         // Mock file status behavior
-        Path oldPath = new Path("s3a://someEnv/oldPath");
-        Path newPath = new Path("s3a://someEnv/newPath");
+        Path oldPath = new Path("s3a://someEnv/oldPath/file.csv");
+        Path newPath = new Path("s3a://someEnv/newPath/file.csv");
         when(fileStatus.getPath()).thenReturn(oldPath);
         when(fileStatus.getPath().getName()).thenReturn("file.csv");
         when(fileStatus.getPath().toString()).thenReturn("s3a://someEnv/oldPath/file.csv");
