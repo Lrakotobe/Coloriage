@@ -1,82 +1,69 @@
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
+
 import static org.mockito.Mockito.*;
-import static org.junit.Assert.*;
 
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.*;
-import org.apache.spark.sql.SparkSession;
-import org.junit.Before;
-import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.mockito.*;
-import org.mockito.junit.MockitoJUnitRunner;
-
-import java.net.URI;
-import java.util.Arrays;
-import java.util.List;
-
-@RunWith(MockitoJUnitRunner.class)
-public class utilsTest {
+class BaseReturnReportServiceTest {
 
     @Mock
     private SparkSession sparkSession;
 
     @Mock
-    private FileSystem fileSystem;
+    private Dataset<Row> datasetRows;
 
     @Mock
-    private RemoteIterator<LocatedFileStatus> fileStatusListIterator;
-
-    @Mock
-    private LocatedFileStatus fileStatus;
-
-    @Mock
-    private S3Properties s3config;
+    private ReportProperties reportProperties;
 
     @InjectMocks
-    private Utils utils;
+    private BaseReturnReportService baseReturnReportService;
 
-    @Before
-    public void setUp() throws Exception {
-        // Initialize the mocks
+    @BeforeEach
+    void setUp() {
         MockitoAnnotations.openMocks(this);
-
-        // Set up mock behavior
-        when(sparkSession.sparkContext()).thenReturn(null); // Simplified for the example
-        when(s3config.getEnv()).thenReturn("someEnv");
-
-        Configuration hadoopConf = new Configuration();
-        when(sparkSession.sparkContext().hadoopConfiguration()).thenReturn(hadoopConf);
-
-        // Mock FileSystem initialization
-        URI uri = new URI("s3a://" + s3config.getEnv());
-        when(FileSystem.get(uri, hadoopConf)).thenReturn(fileSystem);
-        
-        // Mock FileSystem listFiles behavior
-        when(fileSystem.listFiles(any(Path.class), eq(true))).thenReturn(fileStatusListIterator);
     }
 
     @Test
-    public void testFindAndRenameCsvFiles() throws Exception {
-        // Set up the file status iterator mock behavior
-        when(fileStatusListIterator.hasNext()).thenReturn(true, false);
-        when(fileStatusListIterator.next()).thenReturn(fileStatus);
+    void testPersistWithValidInputs() {
+        // Mocking des données
+        when(datasetRows.filter(anyString())).thenReturn(datasetRows);
+        when(datasetRows.isEmpty()).thenReturn(false);
+        
+        // Appel de la méthode à tester
+        baseReturnReportService.persist("inputPath", datasetRows, reportProperties);
+        
+        // Vérifications des appels
+        verify(datasetRows, times(1)).filter(anyString());
+        verify(datasetRows, times(1)).write();
+        // Ajout d'autres vérifications sur le format, options etc.
+    }
 
-        // Mock file status behavior
-        Path oldPath = new Path("s3a://someEnv/oldPath/file.csv");
-        Path newPath = new Path("s3a://someEnv/newPath/file.csv");
-        when(fileStatus.getPath()).thenReturn(oldPath);
-        when(fileStatus.getPath().getName()).thenReturn("file.csv");
-        when(fileStatus.getPath().toString()).thenReturn("s3a://someEnv/oldPath/file.csv");
+    @Test
+    void testPersistWithEmptyInputs() {
+        // Mocking pour tester les inputs vides
+        when(datasetRows.isEmpty()).thenReturn(true);
+        
+        // Appel de la méthode à tester
+        baseReturnReportService.persist("inputPath", datasetRows, reportProperties);
+        
+        // Vérifier que le fichier header est créé avec seulement le header
+        verify(datasetRows, times(1)).isEmpty();
+        verify(datasetRows, never()).write();
+    }
 
-        // Mock file system behavior
-        when(fileSystem.exists(newPath)).thenReturn(false);
+    @Test
+    void testPersistThrowsException() {
+        // Mocking pour simuler une exception
+        when(sparkSession.createDataset(anyList(), any())).thenThrow(new RuntimeException("Test exception"));
 
-        // Call the method
-        List<String> result = utils.findAndRenameCsvFiles(sparkSession, ".csv", "s3a://someEnv/oldPath", "s3a://someEnv/newPath", s3config);
-
-        // Verify interactions and assert results
-        verify(fileSystem).rename(oldPath, newPath);
-        verify(fileSystem).delete(oldPath, true);
-        assertEquals(Arrays.asList("s3a://someEnv/oldPath/file.csv"), result);
+        // Attendre que l'exception soit lancée
+        assertThrows(RuntimeException.class, () -> {
+            baseReturnReportService.persist("inputPath", datasetRows, reportProperties);
+        });
     }
 }
+
