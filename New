@@ -1,69 +1,43 @@
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
+import org.apache.spark.sql.Column;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
+import org.apache.spark.sql.types.DecimalType;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
 
-import static org.mockito.Mockito.*;
+import static org.apache.spark.sql.functions.*;
 
-class BaseReturnReportServiceTest {
+public class DecimalUtils {
 
-    @Mock
-    private SparkSession sparkSession;
+    public static Dataset<Row> ensureDecimalsDoNotConvertToSciNotation(Dataset<Row> df) {
+        // Obtenir le schéma du DataFrame
+        StructType schema = df.schema();
 
-    @Mock
-    private Dataset<Row> datasetRows;
-
-    @Mock
-    private ReportProperties reportProperties;
-
-    @InjectMocks
-    private BaseReturnReportService baseReturnReportService;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-    }
-
-    @Test
-    void testPersistWithValidInputs() {
-        // Mocking des données
-        when(datasetRows.filter(anyString())).thenReturn(datasetRows);
-        when(datasetRows.isEmpty()).thenReturn(false);
+        // Créer une liste de colonnes modifiées
+        Column[] columns = new Column[df.columns().length];
         
-        // Appel de la méthode à tester
-        baseReturnReportService.persist("inputPath", datasetRows, reportProperties);
-        
-        // Vérifications des appels
-        verify(datasetRows, times(1)).filter(anyString());
-        verify(datasetRows, times(1)).write();
-        // Ajout d'autres vérifications sur le format, options etc.
-    }
+        for (int i = 0; i < df.columns().length; i++) {
+            String column = df.columns()[i];
+            StructField field = schema.apply(column);
+            
+            // Vérifier si le type de la colonne est Decimal
+            if (field.dataType() instanceof DecimalType) {
+                DecimalType decimalType = (DecimalType) field.dataType();
+                int scale = decimalType.scale();
+                
+                // Si l'échelle est 6 ou plus, formater le nombre avec 'format_number'
+                if (scale >= 6) {
+                    columns[i] = format_number(col(column), scale).alias(column);
+                } else {
+                    columns[i] = col(column);
+                }
+            } else {
+                // Si ce n'est pas un Decimal, laisser la colonne telle quelle
+                columns[i] = col(column);
+            }
+        }
 
-    @Test
-    void testPersistWithEmptyInputs() {
-        // Mocking pour tester les inputs vides
-        when(datasetRows.isEmpty()).thenReturn(true);
-        
-        // Appel de la méthode à tester
-        baseReturnReportService.persist("inputPath", datasetRows, reportProperties);
-        
-        // Vérifier que le fichier header est créé avec seulement le header
-        verify(datasetRows, times(1)).isEmpty();
-        verify(datasetRows, never()).write();
-    }
-
-    @Test
-    void testPersistThrowsException() {
-        // Mocking pour simuler une exception
-        when(sparkSession.createDataset(anyList(), any())).thenThrow(new RuntimeException("Test exception"));
-
-        // Attendre que l'exception soit lancée
-        assertThrows(RuntimeException.class, () -> {
-            baseReturnReportService.persist("inputPath", datasetRows, reportProperties);
-        });
+        // Sélectionner les colonnes avec ou sans formatage
+        return df.select(columns);
     }
 }
-
