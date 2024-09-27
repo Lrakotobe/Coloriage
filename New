@@ -1,43 +1,27 @@
-import org.apache.spark.sql.Column;
-import org.apache.spark.sql.Dataset;
-import org.apache.spark.sql.Row;
-import org.apache.spark.sql.types.DecimalType;
-import org.apache.spark.sql.types.StructField;
-import org.apache.spark.sql.types.StructType;
+#!/bin/bash
 
-import static org.apache.spark.sql.functions.*;
+# Loop through each CCN_* folder
+for folder in CCN_*; do
+  if [ -d "$folder" ]; then
+    echo "Processing folder: $folder"
 
-public class DecimalUtils {
+    # Find the header file (ends with header.csv) and part files (start with part-)
+    header_file=$(find "$folder" -name "*header.csv")
+    part_files=$(find "$folder" -name "part-*.csv" | sort)
 
-    public static Dataset<Row> ensureDecimalsDoNotConvertToSciNotation(Dataset<Row> df) {
-        // Obtenir le schéma du DataFrame
-        StructType schema = df.schema();
+    # Concatenate header and part files into a new file named after the folder
+    output_file="${folder}.csv"
+    
+    # Start by adding the header file
+    cat "$header_file" > "$output_file"
 
-        // Créer une liste de colonnes modifiées
-        Column[] columns = new Column[df.columns().length];
-        
-        for (int i = 0; i < df.columns().length; i++) {
-            String column = df.columns()[i];
-            StructField field = schema.apply(column);
-            
-            // Vérifier si le type de la colonne est Decimal
-            if (field.dataType() instanceof DecimalType) {
-                DecimalType decimalType = (DecimalType) field.dataType();
-                int scale = decimalType.scale();
-                
-                // Si l'échelle est 6 ou plus, formater le nombre avec 'format_number'
-                if (scale >= 6) {
-                    columns[i] = format_number(col(column), scale).alias(column);
-                } else {
-                    columns[i] = col(column);
-                }
-            } else {
-                // Si ce n'est pas un Decimal, laisser la colonne telle quelle
-                columns[i] = col(column);
-            }
-        }
+    # Append all part files in the sorted order
+    for part in $part_files; do
+      cat "$part" >> "$output_file"
+    done
 
-        // Sélectionner les colonnes avec ou sans formatage
-        return df.select(columns);
-    }
-}
+    # Remove the original folder after concatenation
+    rm -r "$folder"
+    echo "Created $output_file and removed folder $folder"
+  fi
+done
